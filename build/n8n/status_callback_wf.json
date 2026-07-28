@@ -1,0 +1,128 @@
+{
+  "id": "statusCallback01",
+  "name": "Relentless AI - Twilio Status Callback",
+  "nodes": [
+    {
+      "id": "wh-status-01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [220, 200],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twilio-status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "a1b2c3d4-0001-4000-8000-000000000002"
+    },
+    {
+      "id": "resp-200-01",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 80],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "",
+        "options": { "responseCode": 200 }
+      }
+    },
+    {
+      "id": "parse-status-01",
+      "name": "parseStatus",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 320],
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\nconst sid    = body.MessageSid || body.SmsSid || '';\nconst status = (body.MessageStatus || body.SmsStatus || '').toLowerCase();\nconst to     = body.To || '';\nconst from   = body.From || '';\nconst error  = body.ErrorCode || '';\nconst failed = status === 'failed' || status === 'undelivered';\nreturn [{ json: { sid, status, to, from, error, failed } }];"
+      }
+    },
+    {
+      "id": "if-failed-01",
+      "name": "IsFailed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [660, 320],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "id": "cond-failed-01",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dlq-write-01",
+      "name": "writeDLQ",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [880, 220],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Z1DGfO9LPHXmAo4W",
+          "name": "Airtable Goecoach Personal Access Token account"
+        }
+      },
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "appjnWxg9sB3PV7Da", "mode": "list", "cachedResultName": "Relentless AI - client_test" },
+        "table": { "__rl": true, "value": "tblGJjCiX0AFpZtJl", "mode": "list", "cachedResultName": "tbl_dead_letter" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow_name": "twilio-status-callback",
+            "error_message": "={{ 'SMS delivery failed: status=' + $json.status + ' errorCode=' + $json.error + ' to=[REDACTED] sid=' + $json.sid }}",
+            "client_id": "client_test",
+            "status": "new"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "workflow_name", "displayName": "workflow_name", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "error_message", "displayName": "error_message", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "client_id", "displayName": "client_id", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "status", "displayName": "status", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": { "typecast": true }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Respond 200", "type": "main", "index": 0 },
+          { "node": "parseStatus", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "parseStatus": {
+      "main": [
+        [{ "node": "IsFailed", "type": "main", "index": 0 }]
+      ]
+    },
+    "IsFailed": {
+      "main": [
+        [{ "node": "writeDLQ", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "active": false,
+  "tags": []
+}

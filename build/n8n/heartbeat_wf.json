@@ -1,0 +1,161 @@
+{
+  "id": "heartbeat01",
+  "name": "Relentless AI - Heartbeat / SLA Monitor",
+  "nodes": [
+    {
+      "id": "sched-hb-01",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 200],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 6 * * 1-5"
+            }
+          ]
+        },
+        "timezone": "Asia/Kolkata"
+      }
+    },
+    {
+      "id": "check-briefing-01",
+      "name": "checkTodayBriefing",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [440, 200],
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Z1DGfO9LPHXmAo4W",
+          "name": "Airtable Goecoach Personal Access Token account"
+        }
+      },
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "appjnWxg9sB3PV7Da", "mode": "list", "cachedResultName": "Relentless AI - client_test" },
+        "table": { "__rl": true, "value": "={{ 'tbl_briefings' }}", "mode": "id" },
+        "filterByFormula": "=AND({client_id}='client_test', IS_SAME({created_at}, TODAY(), 'day'))",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "eval-hb-01",
+      "name": "evalMiss",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 200],
+      "parameters": {
+        "jsCode": "const rows = $input.all().filter(i => i.json && i.json.id);\nconst missed = rows.length === 0;\nconst today = $now.toFormat('yyyy-MM-dd');\nreturn [{ json: { missed, today, client_id: 'client_test' } }];"
+      }
+    },
+    {
+      "id": "if-miss-01",
+      "name": "IsMissed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [880, 200],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [
+            {
+              "id": "cond-miss-01",
+              "leftValue": "={{ $json.missed }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dlq-hb-01",
+      "name": "writeDLQ",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.2,
+      "position": [1100, 100],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Z1DGfO9LPHXmAo4W",
+          "name": "Airtable Goecoach Personal Access Token account"
+        }
+      },
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "appjnWxg9sB3PV7Da", "mode": "list", "cachedResultName": "Relentless AI - client_test" },
+        "table": { "__rl": true, "value": "tblGJjCiX0AFpZtJl", "mode": "list", "cachedResultName": "tbl_dead_letter" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow_name": "heartbeat-monitor",
+            "error_message": "={{ '⚠️ MISSED BRIEFING: client_test did not receive a morning briefing on ' + $json.today + '. Check the Morning Briefing workflow immediately.' }}",
+            "client_id": "client_test",
+            "status": "new"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "workflow_name", "displayName": "workflow_name", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "error_message", "displayName": "error_message", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "client_id", "displayName": "client_id", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false },
+            { "id": "status", "displayName": "status", "type": "string", "canBeUsedToMatch": false, "display": true, "required": false, "removed": false, "readOnly": false, "defaultMatch": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": { "typecast": true }
+      }
+    },
+    {
+      "id": "alert-sms-01",
+      "name": "AlertOperator",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "credentials": {
+        "twilioApi": {
+          "id": "Iup3ZRFuOaK60uct",
+          "name": "Twilio account"
+        }
+      },
+      "parameters": {
+        "from": "+14482429365",
+        "to": "+916355046464",
+        "message": "={{ '⚠️ RELENTLESS AI ALERT: Morning briefing was NOT sent to client_test on ' + $json.today + '. Check n8n immediately.' }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [[{ "node": "checkTodayBriefing", "type": "main", "index": 0 }]]
+    },
+    "checkTodayBriefing": {
+      "main": [[{ "node": "evalMiss", "type": "main", "index": 0 }]]
+    },
+    "evalMiss": {
+      "main": [[{ "node": "IsMissed", "type": "main", "index": 0 }]]
+    },
+    "IsMissed": {
+      "main": [
+        [
+          { "node": "writeDLQ", "type": "main", "index": 0 },
+          { "node": "AlertOperator", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "active": false,
+  "tags": []
+}

@@ -1,0 +1,60 @@
+# ---------- TABLE DEFINITIONS (first field = primary; must be a text type) ----------
+CLIENT_TABLES = [
+    {"name": "tbl_client_profile", "fields": [
+        T("client_id"), T("full_name"), T("timezone"), T("phone_number"), EMAIL("email"),
+        SEL("plan", "standard", "pro"),
+        SEL("business_stage", "launching", "growing", "operating"),
+        L("twelve_month_goal"), T("industry"), T("market_keywords"),
+        C("manual_biometric_mode"),
+        T("top_priority_1"), T("top_priority_2"), T("top_priority_3"),
+        T("ghl_contact_id"), D("onboarded_date"), C("active"),
+        C("biometric_consent_given"), DT("biometric_consent_date"),
+        C("ambient_consent_given"), DT("ambient_consent_date"),
+        C("calendar_consent_given"), DT("calendar_consent_date"),
+        T("consent_version"),
+        L("context_override"), DT("context_override_set_at"),
+        T("current_avoidance_pattern"), DT("stage_updated_at"), N("onboarding_day"),
+    ]},
+    {"name": "tbl_biometrics", "fields": [
+        T("client_id"), D("date"), N("hrv_score"), N("sleep_score"), N("recovery_score"),
+        SEL("source", "whoop", "oura", "manual_report"),
+        N("manual_sleep_input"), N("manual_energy_input"), N("manual_stress_input"), L("raw_json"),
+    ]},
+    {"name": "tbl_briefings", "fields": [
+        T("client_id"), D("date"), L("briefing_text"),
+        T("top_priority_1"), T("top_priority_2"), T("top_priority_3"),
+        N("recovery_score_at_briefing"), C("briefing_ran"),
+        C("market_signal_included"), C("business_note_included"), DT("delivered_at"),
+    ]},
+    {"name": "tbl_daily_scores", "fields": [
+        T("client_id"), D("date"),
+        N("body_score"), N("focus_score"), N("execution_score"), N("alignment_score"),
+        N("composite_score"),
+        SEL("score_label", "Peak", "Strong", "Steady", "Below Par", "Recovery Day"),
+        N("capital_score"), N("risk_score"), C("biometric_missing"), C("briefing_ran"),
+        N("nudges_sent"), N("nudges_responded"), N("priorities_completed"),
+        N("focus_blocks_protected"), C("context_override_active"), L("raw_data_json"),
+    ]},
+    {"name": "tbl_nudges", "fields": [
+        T("client_id"), DT("timestamp"), L("nudge_content"), T("trigger_reason"),
+        C("responded"), N("response_time_minutes"),
+    ]},
+    {"name": "tbl_transcripts", "fields": [
+        T("client_id"), DT("timestamp"), T("source"), L("raw_transcript"),
+        L("extracted_tasks"), C("tasks_created_in_ghl"), N("task_count"),
+    ]},
+    {"name": "tbl_business_health", "fields": [
+        T("client_id"), D("week_start_date"),
+        SEL("cash_position", "on_track", "tight", "critical"), L("biggest_risk"),
+        SEL("team_health", "strong", "some_issues", "serious_problem", "solo"),
+        L("market_changes"), L("avoided_decision"),
+        SEL("risk_deliberate", "deliberate", "unexpected"),
+        N("capital_score"), N("risk_score"), C("checkin_completed"), L("claude_analysis"),
+    ]},
+    {"name": "tbl_market_signals", "fields": [
+        T("client_id"), D("date"), L("signal_text"),
+        SEL("source", "news_api", "customer_learning"), C("delivered"),
+    ]},
+    {"name": "tbl_monthly_reports", "fields": [
+        T("client_id"), T("month_year"), N("monthly_score"), N("base_score"),
+        N("trend_bonus"), N("consistency_bonus"), N("pillar_improvement_bonus"),

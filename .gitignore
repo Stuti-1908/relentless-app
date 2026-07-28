@@ -1,0 +1,27 @@
+# Root-level ignores for the GoeCoach-Plan monorepo.
+# The relentless-web app has its own .gitignore; this covers the rest.
+
+# Local OMC / agent orchestration state (machine-local, not project source)
+.omc/
+.agents/
+.qodo/
+
+# Local secrets / env files
+.env
+.env.local
+.env.*.local
+!.env*.example
+
+# Node / Next.js build outputs
+node_modules/
+.next/
+out/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.pem
+*.key
+
+# Vercel local link
+.vercel
