@@ -36,7 +36,16 @@
 - Direct DB password reset using `bcryptjs.hashSync(password, 10)` (cost 10, matching format). Hash written `$2a$10$...` (60 chars, bcrypt format).
 - REST login immediately succeeded with the new credentials (`HTTP 200`, owner scopes confirmed: `workflow:execute`, `workflow:read`, `user:list`, `user:resetPassword`, etc.).
 
-**Caveat:** the first reset hash did not survive my login attempts — n8n appears to re-hash on failed-auth events, possibly because the existing row's hash pre-dates n8n's current bcrypt cost. **Final fix only holds because I set then logged in atomically.** Recommending the user also wires real SMTP (Section 6) so future forgotten passwords don't require this escape hatch again.
+**CORRECTED 2026-07-29 (later same day):** an earlier version of this report speculated that "n8n re-hashes on failed-auth events." **That was wrong — n8n does no such thing.** The real explanation is that the server runs **two separate n8n instances** behind Caddy:
+
+| URL | Container | Database |
+|---|---|---|
+| `167.233.94.171.nip.io` | `n8n-n8n-1` | SQLite — **all Relentless AI workflows live here** |
+| `dada-n8n.167.233.94.171.nip.io` | `dadaai-n8n` | Postgres `dadaai_n8n` — unrelated DadaAI project |
+
+Login attempts were landing on the wrong instance. The reset always worked; it was verified against a different user table. Confirmed by `bcrypt.compareSync` against the stored hash on `n8n-n8n-1`.
+
+**Lesson:** near-identical hostnames on one IP. Always confirm the host before diagnosing an auth failure. Real SMTP (Section 6) is still recommended so password recovery doesn't require DB access.
 
 ---
 
@@ -88,7 +97,26 @@ Verified via `GET /rest/workflows?limit=200`. Total: **55 workflows**, broken do
 | 18203 | nudgeEngineGhl1 | 20:30:00 | `loadProfile` | "The service is receiving too many requests from you" |
 | 18205 | stageTrans01ghl | 20:30:00 | (Airtable transport) | "The service is receiving too many requests from you" |
 
-**Common pattern:** every failure originates in **Airtable v2 → search / loadProfile node** with the **same error message**, all **firing at exactly 20:30:00 UTC**. This is a classic burst-overload of Airtable's per-base rate limit (default 5 req/sec).
+**Common pattern:** every failure originates in **Airtable v2 → search / loadProfile node** with the **same error message**, all **firing at exactly 20:30:00 UTC**.
+
+**CORRECTED 2026-07-29 (later same day): this is NOT a rate-limit burst.** That initial reading was wrong, and the trigger-stagger fix applied on its basis was ineffective. Resolving the full error object shows:
+
+```
+message:     "The service is receiving too many requests from you"
+description: "PUBLIC_API_BILLING_LIMIT_EXCEEDED"
+```
+
+The Airtable **plan's monthly API quota is exhausted**. Airtable reuses the "too many requests" wording for a billing cap, which is what caused the misdiagnosis. Staggering triggers, retries, and backoff are all useless against it — calls are rejected regardless of timing.
+
+Execution history dates the exhaustion precisely:
+
+| Date | Success | Error |
+|---|---|---|
+| Jul 22 | 170 | 0 |
+| Jul 23 | 109 | 268 | ← quota ran out mid-day
+| Jul 24–28 | **0** | 460/day |
+
+Total outage since **Jul 23**, not Jul 28. Note also that error volume (460/day) exceeded the healthy baseline (170/day) because every failure spawned an `errHandler01` run whose `writeDeadLetter` node also wrote to Airtable and also failed — a feedback loop consuming quota to log that quota was gone. `errHandler01` was archived on Jul 29 to stop it.
 
 The Error Handler (DLQ) is also showing errors — its own DB read or upstream payload is failing, so failed events aren't getting written to the dead-letter destination either.
 
@@ -122,7 +150,7 @@ Supabase URL from `SUPABASE_SERVICE_KEY` env: `iqdkoufpiafbhmicbdsy.supabase.co`
 
 | # | Severity | Blocker |
 |---|---|---|
-| 1 | 🔴 Critical | **Airtable rate limit exhaustion.** 20:30 scheduled run hit the per-base cap (5 req/s). All workflows cascade-fail. **Fix:** stagger trigger times within the 20:30 window, add per-node retry-on-429 with backoff, or upgrade Airtable plan. Likely also need to look at the Error Handler workflow — it's failing, so failures aren't reaching DLQ. |
+| 1 | 🔴 Critical | **Airtable API billing quota exhausted** (`PUBLIC_API_BILLING_LIMIT_EXCEEDED`), not a rate limit — see the correction in §3. Every Airtable call has been rejected since Jul 23, taking down all 14 n8n workflows *and* the web app's `/api/coaching`, `/api/diagnostic` (lead capture) and `/api/profile-sync` routes. **Decision taken:** migrate the data layer to Supabase rather than buy more quota. Trigger staggering and retry/backoff do NOT help and should not be attempted. |
 | 2 | 🟠 High | **n8n SMTP not configured.** Forgot-password flow is permanently broken — only DB-level reset works. Add `N8N_SMTP_HOST`, `N8N_SMTP_USER`, `N8N_SMTP_PASS`, `N8N_SMTP_SENDER` env vars and restart container. |
 | 3 | 🟠 High | **Twilio Status Callback is inactive.** Without it, you cannot reliably detect failed SMS deliveries. Toggle it ON in `workflows/statusCallback01`. |
 | 4 | 🟡 Medium | **Monthly Report workflow is inactive.** Required by HANDOFF. Toggle ON. |
