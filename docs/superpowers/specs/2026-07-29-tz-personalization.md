@@ -2,7 +2,12 @@
 
 **Date:** 2026-07-29
 **Author:** Claude (brainstorming → spec)
-**Status:** Awaiting user review
+**Status:** SUPERSEDED by `2026-07-29-airtable-to-supabase-migration-design.md` (§7).
+
+> This spec assumed Airtable remained the data layer. Airtable's API billing
+> quota is exhausted and the data layer is migrating to Supabase, so the
+> timezone work is folded into that migration instead. Retained for the gate
+> audit in §1, which is still accurate.
 **Scope:** All 10 active hourly workflows + 3 ungated workflows on the Hetzner n8n instance
 
 ---
