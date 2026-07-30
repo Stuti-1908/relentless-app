@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Routes a signed-out user is allowed to see. Everything else requires a session.
 // /api/health is a public liveness probe (no auth) so uptime monitors can ping it.
-const PUBLIC_PATHS = ["/welcome", "/login", "/auth", "/api/health", "/diagnostic", "/api/diagnostic", "/api/mock", "/api/provision"];
+// "/" must be public too: signed-out visitors land there and page.tsx redirects them
+// to /welcome. Without it, the !user && !isPublic check below intercepts "/" first
+// and sends signed-out visitors to /login before page.tsx ever runs.
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/auth", "/api/health", "/diagnostic", "/api/diagnostic", "/api/mock", "/api/provision"];
 
 // Next.js 16 renamed the "middleware" convention to "proxy".
 export async function proxy(request: NextRequest) {
