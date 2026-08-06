@@ -6,6 +6,10 @@ export const metadata: Metadata = {
   description: "Your AI executive-coaching dashboard.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "Relentless", statusBarStyle: "black-translucent" },
+  icons: {
+    icon: [{ url: "/favicon.ico" }, { url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png" }],
+  },
 };
 
 export const viewport: Viewport = {
