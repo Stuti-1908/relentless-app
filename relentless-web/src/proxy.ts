@@ -66,5 +66,12 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Run on everything except Next internals, static assets, and API routes.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  //
+  // .webmanifest is exempt for a functional reason, not just performance: the browser
+  // fetches the manifest ANONYMOUSLY, without the session cookie. Any auth check here
+  // therefore always sees a signed-out request and 307s it to /login, so the browser
+  // never receives the icon set and falls back to a generic home-screen icon.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest)$).*)",
+  ],
 };
