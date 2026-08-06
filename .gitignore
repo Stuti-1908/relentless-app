@@ -25,3 +25,6 @@ Thumbs.db
 
 # Vercel local link
 .vercel
+
+# Screen recordings (large, not source)
+*.mp4
