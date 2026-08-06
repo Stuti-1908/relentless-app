@@ -190,6 +190,7 @@ router already trusted). Verified live with a blank/mismatched phone + correct `
 | Per-client timezone scheduling | 🔴 Not built — all cron is India-time |
 | Calendar / CRM / Email / Slack / Sales / LinkedIn integrations | 🔴 Not built — "Coming soon" placeholders |
 | Briefing / feedback / weekly / monthly / stage / bad-day / market senders | 🔴 Single-client only, not fanned out |
-| Base-per-client isolation (spec'd) vs shared base + client_id (built) | ⚠️ Deliberate trade-off, revisit later |
+| Airtable as the data layer | ✅ **Retired 2026-08-06** — migrated to Supabase after the API billing quota was exhausted (total outage from Jul 23). Zero Airtable nodes remain in n8n. |
+| Base-per-client isolation (spec'd) vs shared base + client_id (built) | ✅ Moot — Airtable is gone; Supabase RLS now scopes rows per client |
 | War Room phone-matching robustness | ⚠️ Fixed today with `ghl_contact_id` fallback — re-verify after demo |
 | Wearable auto-sync (vs manual biometric entry) | ⚠️ Manual entry works; auto-sync deferred, not a current priority per user |
