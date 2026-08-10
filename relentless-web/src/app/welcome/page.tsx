@@ -14,7 +14,7 @@ export default function WelcomePage() {
       <header className={styles.header}>
         <div className={styles.wrap}>
           <div className={styles.logo}>
-            <span>R</span>
+            <img src="/icon-192.png" alt="Relentless" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <p className={styles.eyebrow}>Relentless AI · Private Beta</p>
           <h1>

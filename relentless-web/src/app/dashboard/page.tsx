@@ -972,7 +972,9 @@ export default function DashboardPage() {
     <>
       {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
       <aside className={`cc-sidebar${isSidebarTour ? " tour-sidebar-active" : ""}`}>
-        <div className="cc-logo">R</div>
+        <div className="cc-logo">
+          <img src="/icon-192.png" alt="Relentless" />
+        </div>
 
         <nav className="cc-nav">
           <button className="cc-nav-btn active" aria-label="Dashboard">

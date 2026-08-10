@@ -31,25 +31,21 @@ export async function POST(req: Request) {
   const pat = process.env.RELENTLESS_WEB_APP_AIRTABLE_TOKEN || process.env.AIRTABLE_PAT;
   if (!pat) return NextResponse.json({ error: "not configured" }, { status: 500 });
 
-  // Derive the client's phone + plan from their Airtable profile. We gate on the AIRTABLE plan
-  // (the same source /api/coaching and the n8n backend use) — NOT the Supabase ctx.plan, which can
-  // drift out of sync. The workflow matches {phone_number}=From.
+  // Derive the client's phone + plan from the Supabase v_clients view (which matches n8n).
+  // The workflow matches {phone_number}=From.
   let phone = "";
-  let airtablePlan = "";
+  let supaPlan = "";
   try {
-    const filt = encodeURIComponent(`{client_id}='${(clientId ?? "").replace(/'/g, "")}'`);
-    const r = await fetch(
-      `${AIRTABLE_API}/${baseId}/${encodeURIComponent("tbl_client_profile")}?filterByFormula=${filt}&maxRecords=1`,
-      { headers: { Authorization: `Bearer ${pat}` }, cache: "no-store" }
-    );
-    const d = (await r.json()) as { records?: { fields?: { phone_number?: unknown; plan?: unknown } }[] };
-    phone = String(d?.records?.[0]?.fields?.phone_number ?? "");
-    airtablePlan = String(d?.records?.[0]?.fields?.plan ?? "");
+    const { createClient } = await import("@/lib/supabase/server");
+    const sb = await createClient();
+    const { data } = await sb.from("v_clients").select("phone_number, plan").eq("client_id", clientId ?? "").maybeSingle();
+    phone = data?.phone_number || "";
+    supaPlan = data?.plan || "";
   } catch {
     /* fall through to the guards below */
   }
 
-  const plan = (airtablePlan || ctx?.plan || "standard").toLowerCase();
+  const plan = (supaPlan || ctx?.plan || "standard").toLowerCase();
   if (plan !== "pro") {
     return NextResponse.json({ error: "War Room is a Pro feature." }, { status: 403 });
   }
