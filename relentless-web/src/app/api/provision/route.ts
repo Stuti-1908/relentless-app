@@ -1,26 +1,35 @@
 import { NextResponse } from "next/server";
 import { getClientContext } from "@/lib/clientContext";
 import { sameOriginOk } from "@/lib/csrf";
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { toE164 } from "@/lib/phone";
 
 // Auto-provision a new user into the shared coaching base so their dashboard + SMS automation work
 // with NO manual Phase-0. Idempotent: no-op if already provisioned. Server-side tokens only.
+//
+// Rewritten 2026-08-17: this route was still writing to Airtable's tbl_client_profile,
+// dead since the 2026-08-06 Supabase migration (same bug independently found and
+// fixed in api/profile-sync — see that file's history). Every user who signed up
+// since 08-06 silently got NO client_profile row: no coaching data, no nudges, no
+// briefings, nothing — the dashboard would show empty/static content forever,
+// indistinguishable from "not yet provisioned" because that's exactly what it was.
+//
+// Identity split, same convention as the rest of the project (see
+// build/migration/001_schema_phase1.sql): profiles holds full_name/phone/timezone/
+// ghl_contact_id/plan; client_profile holds coaching-only fields keyed by client_id.
+// A new user therefore needs BOTH a client_profile insert (coaching row) and a
+// profiles update (client_id/ghl_contact_id/plan link) — the same two writes
+// provision always intended, just now against the right store.
 
-const AIRTABLE_API = process.env.AIRTABLE_API_URL || "https://api.airtable.com/v0";
 const GHL_API = process.env.GHL_API_URL || "https://services.leadconnectorhq.com";
-const BASE_ID = process.env.AIRTABLE_BASE_ID || "appjnWxg9sB3PV7Da";
 
-function e164(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const d = raw.replace(/\D/g, "");
-  return d.length >= 10 ? "+" + d : null;
-}
 function newClientId(): string {
   let s = "";
   for (let i = 0; i < 8; i++) s += Math.floor(Math.random() * 16).toString(16);
   return "client_" + s;
 }
-// Validates a real IANA timezone identifier (Node's Intl supports this too — no client-only APIs needed).
+
 function isValidTimezone(tz: unknown): tz is string {
   if (typeof tz !== "string" || !tz) return false;
   try {
@@ -33,76 +42,23 @@ function isValidTimezone(tz: unknown): tz is string {
 
 export async function POST(req: Request) {
   if (!sameOriginOk(req)) return NextResponse.json({ ok: false, reason: "bad_origin" }, { status: 403 });
-  
-  let { userId, ctx, profile } = await getClientContext();
-  
-  const isDev = process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("localhost") || process.env.NODE_ENV === "development";
-  console.log("[DEBUG api/provision] isDev:", isDev, "NODE_ENV:", process.env.NODE_ENV, "SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL, "userId:", userId);
-  if (!userId && isDev) {
-    // 1. Try reading Authorization header (e.g. Bearer <userId>)
-    const authHeader = req.headers.get("authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      userId = authHeader.substring(7);
-      console.log("[DEBUG api/provision] extracted userId from authorization header:", userId);
-    }
 
-    // 2. Fallback to reading request body
-    if (!userId) {
-      try {
-        const text = await req.text();
-        console.log("[DEBUG api/provision] raw body text:", text);
-        if (text.trim()) {
-          const body = JSON.parse(text);
-          console.log("[DEBUG api/provision] parsed body:", body);
-          if (body && body.userId) {
-            userId = body.userId;
-          }
-        }
-      } catch (e) {
-        console.error("[api/provision] parse error:", e);
-      }
-    }
-
-    // 3. Load profile and context if userId was found
-    if (userId) {
-      try {
-        const supabase = await createClient();
-        const { data: p } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-        console.log("[DEBUG api/provision] found profile for userId:", p);
-        if (p) {
-          profile = p as Record<string, unknown>;
-          const str = (v: unknown): string | null =>
-            typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-          ctx = {
-            userId: userId!,
-            clientId: str(p.client_id),
-            baseId: str(p.airtable_base_id),
-            ghlContactId: str(p.ghl_contact_id),
-            plan: str(p.plan) ?? "standard",
-          };
-        }
-      } catch (dbErr) {
-        console.error("[api/provision] db fetch profile error:", dbErr);
-      }
-    }
-  }
-
+  const { userId, ctx, profile } = await getClientContext();
   if (!userId) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
 
   // Idempotent — already provisioned.
-  if (ctx?.clientId && ctx?.baseId) {
+  if (ctx?.clientId) {
     return NextResponse.json({ ok: true, already: true, clientId: ctx.clientId });
   }
-  const pat = process.env.RELENTLESS_WEB_APP_AIRTABLE_TOKEN || process.env.AIRTABLE_PAT;
+
   const ghl = process.env.GHL_TOKEN;
   const ghlLoc = process.env.GHL_LOCATION_ID;
-  if (!pat) return NextResponse.json({ ok: false, reason: "no_airtable_token" }, { status: 500 });
   const p = profile || {};
   const fullName = (typeof p.full_name === "string" ? p.full_name : "").trim() || "Client";
-  const phone = e164(p.phone);
+  const phone = toE164(typeof p.phone === "string" ? p.phone : undefined);
   const email = typeof p.email === "string" ? p.email : null;
   const goal = typeof p.primary_goal === "string" ? p.primary_goal : null;
-  const plan = (ctx?.plan && ctx.plan !== "standard" ? ctx.plan : (typeof p.plan === "string" ? p.plan : "standard"));
+  const plan = ctx?.plan && ctx.plan !== "standard" ? ctx.plan : typeof p.plan === "string" ? p.plan : "standard";
   const clientId = newClientId();
 
   // 1. GHL contact (best-effort — provisioning still succeeds if GHL is slow/misconfigured).
@@ -125,36 +81,33 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2. Airtable tbl_client_profile row.
-  const fields: Record<string, unknown> = {
+  // client_profile has no browser-write RLS policy by design (see 001_schema_phase1.sql
+  // §6) — this insert needs the service-role client. The profiles update below stays on
+  // the session client since profiles already allows a user to write their own row
+  // (onboarding/page.tsx's upsert already relies on this working).
+  const supabaseService = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  // 2. client_profile row — coaching-only fields, per the identity-split convention.
+  // onboarding_day starts at 2, not 1: the immediate welcome SMS below already covers
+  // the Day-1 theme, so tomorrow's 7-Day Onboarding cron should send Day-2 content.
+  const clientProfileFields: Record<string, unknown> = {
     client_id: clientId,
-    full_name: fullName,
-    plan,
-    // Starts at 2, not 1: the immediate welcome SMS above already covers the Day-1 theme,
-    // so tomorrow's 7-Day Onboarding cron should send Day-2 content, not repeat Day-1.
-    onboarding_day: 2,
     active: true,
+    onboarding_day: 2,
     onboarded_date: new Date().toISOString().slice(0, 10),
   };
-  if (phone) fields.phone_number = phone;
-  if (email) fields.email = email;
-  if (goal) fields.top_priority_1 = goal;
-  if (isValidTimezone(p.timezone)) fields.timezone = p.timezone;
-  if (ghlContactId) fields.ghl_contact_id = ghlContactId;
-  try {
-    const r = await fetch(`${AIRTABLE_API}/${BASE_ID}/tbl_client_profile`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ fields, typecast: true }),
-    });
-    if (!r.ok) {
-      const t = await r.text();
-      console.error("[provision] Airtable create failed", r.status, t.slice(0, 200));
-      return NextResponse.json({ ok: false, reason: "airtable_create_failed" }, { status: 502 });
-    }
-  } catch (e) {
-    console.error("[provision] Airtable error", e instanceof Error ? e.message : e);
-    return NextResponse.json({ ok: false, reason: "airtable_error" }, { status: 502 });
+  if (goal) clientProfileFields.top_priority_1 = goal;
+  if (email) clientProfileFields.email = email;
+  if (isValidTimezone(p.timezone)) clientProfileFields.timezone_override = p.timezone;
+  if (phone) clientProfileFields.phone_override = phone;
+
+  const { error: cpErr } = await supabaseService.from("client_profile").insert(clientProfileFields);
+  if (cpErr) {
+    console.error("[provision] client_profile insert failed", cpErr.message);
+    return NextResponse.json({ ok: false, reason: "client_profile_insert_failed" }, { status: 502 });
   }
 
   // 2b. Immediate Day-1 welcome SMS (best-effort) — don't make the new client wait for the
@@ -175,15 +128,15 @@ export async function POST(req: Request) {
     }
   }
 
-  // 3. Link the user's Supabase profile to the new client (own-row update; RLS allows).
-  const supabase = await createClient();
-  const { error: upErr } = await supabase
+  // 3. Link the user's own profiles row to the new client_id (own-row update; RLS allows).
+  const supabaseSession = await createServerClient();
+  const { error: upErr } = await supabaseSession
     .from("profiles")
-    .update({ client_id: clientId, airtable_base_id: BASE_ID, ghl_contact_id: ghlContactId, plan })
+    .update({ client_id: clientId, ghl_contact_id: ghlContactId, plan })
     .eq("id", userId);
   if (upErr) {
-    console.error("[provision] supabase link failed", upErr.message);
-    return NextResponse.json({ ok: false, reason: "supabase_link_failed" }, { status: 502 });
+    console.error("[provision] profiles link failed", upErr.message);
+    return NextResponse.json({ ok: false, reason: "profiles_link_failed" }, { status: 502 });
   }
 
   return NextResponse.json({ ok: true, clientId, ghlContactId, provisioned: true });

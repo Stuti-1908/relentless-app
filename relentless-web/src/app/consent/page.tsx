@@ -11,12 +11,13 @@ export default function ConsentPage() {
   const [agreed, setAgreed] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // If this user already consented before, skip straight into the app.
+  // If this user already consented before, skip straight to the payment gate
+  // (it forwards past itself to /onboarding if already paid, which in turn
+  // forwards to /dashboard if onboarding is already complete).
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user?.user_metadata?.consented_at) {
-        // Already consented — let onboarding decide (it forwards to /dashboard if complete).
-        router.replace("/onboarding");
+        router.replace("/payment");
       }
     });
   }, [router, supabase]);
@@ -32,7 +33,7 @@ export default function ConsentPage() {
     await supabase.auth.updateUser({
       data: { consented_at: new Date().toISOString(), policy_version: "draft-2026-06" },
     });
-    router.push("/onboarding");
+    router.push("/payment");
   }
 
   return (

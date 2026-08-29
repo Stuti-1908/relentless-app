@@ -54,11 +54,19 @@ export default function OnboardingPage() {
 
       const { data, error: err } = await supabase
         .from("profiles")
-        .select("full_name,company,role,phone,timezone,primary_goal,onboarded")
+        .select("full_name,company,role,phone,timezone,primary_goal,onboarded,payment_verified")
         .eq("id", user.id)
         .maybeSingle();
 
       if (cancelled) return;
+
+      // Payment gate: don't let onboarding be reached by typing the URL
+      // directly before paying. Editing an already-onboarded profile is
+      // exempt (payment_verified is already true by then anyway).
+      if (!isEditing && !err && data && !data.payment_verified) {
+        router.replace("/payment");
+        return;
+      }
 
       if (!err && data) {
         if (data.onboarded && !isEditing) {

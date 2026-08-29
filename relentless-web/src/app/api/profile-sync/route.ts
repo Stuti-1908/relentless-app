@@ -2,15 +2,25 @@ import { NextResponse } from "next/server";
 import { getClientContext } from "@/lib/clientContext";
 import { sameOriginOk } from "@/lib/csrf";
 import { toE164 } from "@/lib/phone";
-import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { createClient } from "@supabase/supabase-js";
 
-// W1 — Write path: push the signed-in user's web profile into THEIR Airtable `tbl_client_profile`
-// record (client + base resolved from their profile), so the n8n briefing/nudges use their data.
-// The Airtable token stays server-side. An unprovisioned user has nowhere to write -> no-op.
+// W1 — Write path: push the signed-in user's web profile into THEIR client_profile
+// row (client resolved from their profiles row), so the n8n briefing/nudges use
+// their data. An unprovisioned user has no client_profile row -> no-op.
+//
+// Rewritten 2026-08-17: was still writing to Airtable's tbl_client_profile, dead
+// since the 2026-08-06 Supabase migration — same bug independently found and
+// fixed in api/provision (see that file's history for the full story). Every
+// profile edit since 08-06 silently wrote nowhere real.
+//
+// Identity split, same convention as the rest of the project: full_name/phone/
+// timezone live on profiles (browser writes those directly via Supabase RLS,
+// already correct — see onboarding/page.tsx), so this route only needs to sync
+// the fields client_profile actually has: top_priority_1 (top_priority_1 has no
+// profiles equivalent), plus phone_override/timezone_override as the n8n-facing
+// escape hatch when a client wants their coaching contact info to differ from
+// their login profile (rare, but the column exists for exactly this).
 
-const AIRTABLE_API = process.env.AIRTABLE_API_URL || "https://api.airtable.com/v0";
-
-// Validates a real IANA timezone identifier (Node's Intl supports this too — no client-only APIs needed).
 function isValidTimezone(tz: unknown): tz is string {
   if (typeof tz !== "string" || !tz) return false;
   try {
@@ -25,77 +35,47 @@ export async function POST(request: Request) {
   if (!sameOriginOk(request)) {
     return NextResponse.json({ ok: false, reason: "bad_origin" }, { status: 403 });
   }
-  const pat =
-    process.env.RELENTLESS_WEB_APP_AIRTABLE_TOKEN || process.env.AIRTABLE_PAT;
 
-  // Must be signed in — this writes that user's own data.
   const { userId, ctx, profile } = await getClientContext();
   if (!userId) {
     return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
   }
-  // Tenant resolved from the user's profile — never a shared env var.
-  const baseId = ctx?.baseId;
   const clientId = ctx?.clientId;
-  if (!pat || !baseId || !clientId) {
+  if (!clientId) {
     return NextResponse.json({ ok: false, reason: "not_provisioned" }, { status: 200 });
   }
   if (!profile) {
     return NextResponse.json({ ok: false, reason: "no_profile" }, { status: 200 });
   }
 
-  // Build the Airtable field patch (only include fields that have a value).
+  // Build the client_profile patch (only include fields that have a value).
   const fields: Record<string, string> = {};
-  if (typeof profile.full_name === "string") fields.full_name = profile.full_name;
+  if (typeof profile.primary_goal === "string" && profile.primary_goal.trim()) {
+    fields.top_priority_1 = profile.primary_goal;
+  }
   const phone = toE164(profile.phone as string | undefined);
-  if (phone) fields.phone_number = phone;
-  if (isValidTimezone(profile.timezone)) fields.timezone = profile.timezone;
-  if (typeof profile.primary_goal === "string") fields.top_priority_1 = profile.primary_goal;
+  if (phone) fields.phone_override = phone;
+  if (isValidTimezone(profile.timezone)) fields.timezone_override = profile.timezone;
 
   if (Object.keys(fields).length === 0) {
     return NextResponse.json({ ok: true, synced: [], note: "nothing to sync" });
   }
 
-  // Find the client record id (by client_id), then PATCH it. Guarded to the pinned base only.
-  const findUrl =
-    `${AIRTABLE_API}/${baseId}/tbl_client_profile` +
-    `?filterByFormula=${encodeURIComponent(`{client_id}='${clientId}'`)}&maxRecords=1`;
-  const findRes = await fetchWithRetry(findUrl, {
-    headers: { Authorization: `Bearer ${pat}` },
-    cache: "no-store",
-  });
-  if (!findRes.ok) {
-    return NextResponse.json(
-      { ok: false, reason: "lookup_failed", status: findRes.status },
-      { status: 502 }
-    );
-  }
-  const found = (await findRes.json()) as { records: { id: string }[] };
-  const recordId = found.records[0]?.id;
-  if (!recordId) {
-    return NextResponse.json({ ok: false, reason: "client_not_found" }, { status: 404 });
+  // client_profile has no browser-write RLS policy by design (see 001_schema_phase1.sql
+  // §6 — "All writes to these tables come from n8n via the service_role key"). This is a
+  // legitimate server-side write on the signed-in user's own row, not something RLS
+  // should gate, so it uses the service-role client rather than the session-bound one —
+  // same pattern api/warroom/route.ts already established for its v_clients read.
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  const { error } = await supabase.from("client_profile").update(fields).eq("client_id", clientId);
+
+  if (error) {
+    console.error(`[profile-sync] Supabase write failed: ${error.message}`);
+    return NextResponse.json({ ok: false, reason: "write_failed", code: "supabase_write_error" }, { status: 502 });
   }
 
-  const patchRes = await fetchWithRetry(`${AIRTABLE_API}/${baseId}/tbl_client_profile/${recordId}`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ fields, typecast: true }),
-  });
-  if (!patchRes.ok) {
-    // Log upstream detail SERVER-SIDE only — never return provider text (may contain PII) to the browser.
-    const text = await patchRes.text();
-    console.error(`[profile-sync] Airtable write failed ${patchRes.status}: ${text.slice(0, 300)}`);
-    return NextResponse.json(
-      {
-        ok: false,
-        reason: "write_failed",
-        code:
-          patchRes.status === 403
-            ? "airtable_write_scope_missing"
-            : "airtable_write_error",
-      },
-      { status: 502 }
-    );
-  }
-
-  return NextResponse.json({ ok: true, synced: Object.keys(fields), recordId });
+  return NextResponse.json({ ok: true, synced: Object.keys(fields) });
 }

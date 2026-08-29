@@ -392,6 +392,25 @@ export default function DashboardPage() {
   const [newTaskDate, setNewTaskDate] = useState(todayISODate());
   const [newTaskPrio, setNewTaskPrio] = useState<Prio>("med");
   const [newRepeat, setNewRepeat] = useState<RepeatRule>("none");
+
+  // Payment gate: dashboard is normally only reached via /onboarding (which
+  // already checks payment_verified), but a stale bookmark/back-button could
+  // land here directly for an unpaid user — belt-and-suspenders check.
+  // See build/migration/009_payment_gate.sql and api/payment/confirm/route.ts
+  // for the known redirect-trust gap this column carries.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles").select("payment_verified,onboarded").eq("id", user.id).maybeSingle();
+      if (cancelled || !data) return;
+      if (!data.payment_verified) router.replace("/payment");
+      else if (!data.onboarded) router.replace("/onboarding");
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, router]);
   const [newRepeatDays, setNewRepeatDays] = useState<number[]>([]);
   const [newRemindAt, setNewRemindAt] = useState("09:00");
   // Inline recurrence editor (click a task's 🔁 schedule to edit)
@@ -2046,7 +2065,10 @@ export default function DashboardPage() {
         <div className="wr-overlay" onClick={() => setWrOpen(false)}>
           <div className="wr-panel" onClick={(e) => e.stopPropagation()}>
             <div className="wr-head">
-              <div><strong>War Room</strong> <span className="pro-tag">PRO</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <img src="/icon-192.png" alt="Relentless" style={{ width: 24, height: 24, borderRadius: "50%" }} />
+                <strong>War Room</strong> <span className="pro-tag">PRO</span>
+              </div>
               <button onClick={() => setWrOpen(false)} aria-label="Close War Room">×</button>
             </div>
             <div className="wr-msgs">

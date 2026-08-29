@@ -8,7 +8,6 @@ import { sameOriginOk } from "@/lib/csrf";
 
 const WARROOM_URL =
   process.env.N8N_WARROOM_URL || "https://167.233.94.171.nip.io/webhook/war-room";
-const AIRTABLE_API = process.env.AIRTABLE_API_URL || "https://api.airtable.com/v0";
 
 export async function POST(req: Request) {
   if (!sameOriginOk(req)) {
@@ -16,9 +15,12 @@ export async function POST(req: Request) {
   }
   const { userId, ctx } = await getClientContext();
   if (!userId) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  const baseId = ctx?.baseId;
   const clientId = ctx?.clientId;
-  if (!baseId) return NextResponse.json({ error: "not_provisioned" }, { status: 400 });
+  // Provisioned = has a client_id (Supabase client_profile row), not the legacy
+  // airtable_base_id column — see api/provision/route.ts's 2026-08-17 rewrite.
+  // Checking baseId here (as this route did before) would permanently reject
+  // every newly-provisioned user, since provision no longer sets that column.
+  if (!clientId) return NextResponse.json({ error: "not_provisioned" }, { status: 400 });
 
   let message = "";
   try {
@@ -28,20 +30,22 @@ export async function POST(req: Request) {
   }
   if (!message.trim()) return NextResponse.json({ error: "empty message" }, { status: 400 });
 
-  const pat = process.env.RELENTLESS_WEB_APP_AIRTABLE_TOKEN || process.env.AIRTABLE_PAT;
-  if (!pat) return NextResponse.json({ error: "not configured" }, { status: 500 });
-
   // Derive the client's phone + plan from the Supabase v_clients view (which matches n8n).
   // The workflow matches {phone_number}=From.
   let phone = "";
   let supaPlan = "";
   try {
-    const { createClient } = await import("@/lib/supabase/server");
-    const sb = await createClient();
-    const { data } = await sb.from("v_clients").select("phone_number, plan").eq("client_id", clientId ?? "").maybeSingle();
+    const { createClient } = await import("@supabase/supabase-js");
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data, error } = await sb.from("v_clients").select("phone_number, plan").eq("client_id", clientId ?? "").maybeSingle();
+    if (error) console.error("warroom v_clients query error:", error);
     phone = data?.phone_number || "";
     supaPlan = data?.plan || "";
-  } catch {
+  } catch (err) {
+    console.error("warroom v_clients catch:", err);
     /* fall through to the guards below */
   }
 
@@ -52,7 +56,7 @@ export async function POST(req: Request) {
   if (!phone) return NextResponse.json({ error: "no phone on your profile yet" }, { status: 400 });
 
   // Relay one turn (Twilio-style form params) to the n8n War Room webhook.
-  const form = new URLSearchParams({ From: phone, Body: message, MessageSid: `web-${Date.now()}` });
+  const form = new URLSearchParams({ From: phone, Body: message, MessageSid: `web-${Date.now()}`, contactId: clientId ?? "" });
   try {
     const r = await fetch(WARROOM_URL, {
       method: "POST",
