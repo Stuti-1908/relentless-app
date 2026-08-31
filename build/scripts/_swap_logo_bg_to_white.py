@@ -57,6 +57,15 @@ def main():
     im.save(favicon_path, sizes=[(s, s) for s in favicon_sizes])
     print(f"wrote {favicon_path} (sizes: {favicon_sizes})")
 
+    # Next.js's app/favicon.ico file-route convention takes precedence over
+    # public/favicon.ico -- discovered 2026-08-31 when the live site kept
+    # serving a stale black-background favicon despite public/favicon.ico
+    # being correct and deployed. Must stay in sync or this bug repeats on
+    # every future logo change.
+    app_favicon_path = "relentless-web/src/app/favicon.ico"
+    im.save(app_favicon_path, sizes=[(s, s) for s in favicon_sizes])
+    print(f"wrote {app_favicon_path} (sizes: {favicon_sizes}) -- this is the one Next.js actually serves")
+
 
 if __name__ == "__main__":
     main()
