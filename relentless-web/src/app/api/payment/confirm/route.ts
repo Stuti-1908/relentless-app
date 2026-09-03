@@ -1,40 +1,20 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { sameOriginOk } from "@/lib/csrf";
 
-// Marks the signed-in user's profile as payment_verified after they return
-// from the Square Payment Link checkout.
-//
-// *** KNOWN GAP, explicit and accepted 2026-08-17 (see PaymentPage.tsx for
-// the full note) — this is REDIRECT-TRUST ONLY. There is no Square API call
-// here confirming a real payment/order exists. Any authenticated user who
-// reaches this endpoint gets payment_verified=true, whether or not they
-// actually paid. This was a deliberate scope decision to ship the flow today
-// without a Square API access token; treat this as a stopgap, not a real
-// paywall, until real verification (Square Orders/Payments API, checking a
-// checkoutId/orderId query param against Square's servers) replaces it. ***
-//
-// sameOriginOk still applies — this at least prevents a third-party site
-// from silently marking a user paid via a cross-origin POST, though it does
-// nothing to stop the user themselves from just visiting this URL directly.
-export async function POST(req: Request) {
-  if (!sameOriginOk(req)) return NextResponse.json({ ok: false, reason: "bad_origin" }, { status: 403 });
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
-
-  const { error } = await supabase
-    .from("profiles")
-    .update({ payment_verified: true, payment_verified_at: new Date().toISOString() })
-    .eq("id", user.id);
-
-  if (error) {
-    console.error("[api/payment/confirm] update failed", error.message);
-    return NextResponse.json({ ok: false, reason: "db_error" }, { status: 502 });
-  }
-
-  return NextResponse.json({ ok: true });
+// *** DEPRECATED 2026-08-29/30 — replaced by real Stripe webhook verification.
+// This was the Square-era redirect-trust confirm route: any authenticated
+// user hitting this URL got payment_verified=true, no real payment check
+// (an explicit, accepted gap at the time — see the payment gate's original
+// 2026-08-17 rollout). Nothing in the app calls this anymore. /payment/
+// page.tsx now sends the user to a fixed Stripe Payment Link (with
+// ?client_reference_id=<user id>), and /payment/confirm/page.tsx polls for
+// payment_verified, which is set by api/payment/stripe-webhook after
+// verifying Stripe's webhook signature server-to-server — a real proof of
+// payment, not a trusted redirect. Kept as a 410 stub (not deleted) only so
+// the URL fails loudly and traceably if anything external still points at
+// it, rather than 404ing silently.
+export async function POST() {
+  return NextResponse.json(
+    { ok: false, reason: "deprecated_use_stripe_webhook" },
+    { status: 410 }
+  );
 }

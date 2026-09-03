@@ -4,9 +4,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-// Landing point for Square's redirect_url after checkout (see /payment/page.tsx
-// for how that URL is built, and api/payment/confirm/route.ts for the KNOWN GAP
-// note — this whole page trusts the redirect, no Square API verification yet).
+// Landing point after Stripe Payment Link checkout completes (see
+// /payment/page.tsx for how the Payment Link URL, with
+// ?client_reference_id=<user id>, is built).
+//
+// Unlike the old Square flow, this page does NOT itself mark the user paid
+// — that happens server-to-server via api/payment/stripe-webhook when
+// Stripe sends checkout.session.completed, verified by webhook signature.
+// This page just POLLS profiles.payment_verified for a few seconds, since
+// the webhook delivery can arrive slightly after the browser redirect
+// (typically well under a second, but not guaranteed instant). If it
+// doesn't land within the poll window, this is a genuine "something's
+// wrong" state worth surfacing, not something to paper over by marking the
+// user paid anyway — that would recreate the exact redirect-trust gap this
+// Stripe migration exists to close.
+const POLL_INTERVAL_MS = 1500;
+const MAX_POLLS = 8; // ~12 seconds total
+
 export default function PaymentConfirmPage() {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
@@ -14,23 +28,39 @@ export default function PaymentConfirmPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let pollCount = 0;
+
+    async function poll() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        router.replace("/login");
+        if (!cancelled) router.replace("/login");
         return;
       }
-      try {
-        const res = await fetch("/api/payment/confirm", { method: "POST" });
-        if (!res.ok) throw new Error("confirm failed");
-      } catch {
-        if (!cancelled) setStatus("error");
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("payment_verified")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (data?.payment_verified) {
+        router.replace("/onboarding");
         return;
       }
-      if (!cancelled) router.replace("/onboarding");
-    })();
+
+      pollCount += 1;
+      if (pollCount >= MAX_POLLS) {
+        setStatus("error");
+        return;
+      }
+      setTimeout(poll, POLL_INTERVAL_MS);
+    }
+
+    poll();
     return () => {
       cancelled = true;
     };
@@ -49,17 +79,17 @@ export default function PaymentConfirmPage() {
           </>
         ) : (
           <>
-            <h2 style={{ fontSize: 20, margin: "14px 0 2px" }}>Something went wrong</h2>
+            <h2 style={{ fontSize: 20, margin: "14px 0 2px" }}>Still confirming</h2>
             <p style={{ color: "var(--muted)", fontSize: 14 }}>
-              We couldn&apos;t confirm your account. If you were just charged, contact support —
-              we&apos;ll get you set up.
+              Your payment may still be processing. If you were just charged and this doesn&apos;t
+              resolve in a minute, contact support — we&apos;ll get you set up.
             </p>
             <button
               className="btn btn-primary btn-block"
               style={{ marginTop: 16 }}
               onClick={() => router.push("/payment")}
             >
-              Try again
+              Back to payment
             </button>
           </>
         )}

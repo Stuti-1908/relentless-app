@@ -4,24 +4,22 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-// The fixed $69/month Square Payment Link (see build/migration/009_payment_gate.sql
-// for the schema this gates). Square Payment Links accept a redirect_url query
-// param sent to the buyer's browser after checkout completes; we point it at
-// /payment/confirm so we know which signed-in user just came back from paying.
-//
-// KNOWN GAP (2026-08-17, explicit user decision -- see conversation): this is
-// redirect-trust only, NOT verified against Square's API. Anyone who lands on
-// /payment/confirm with a session is marked paid, whether or not a real
-// payment happened -- e.g. by bookmarking or guessing the URL. Square API
-// verification (checking a real order/payment ID server-side) should replace
-// this once a Square access token is available. Do not remove this comment
-// when that hardening lands -- replace it with what changed.
-const SQUARE_PAYMENT_LINK = "https://square.link/u/krl5xmYt";
+// Switched from Square to Stripe 2026-08-29/30. Uses a Stripe Payment Link
+// (a fixed hosted checkout URL, created directly in the Stripe Dashboard --
+// simpler than the dynamic Checkout Session approach originally built, no
+// STRIPE_PRICE_ID/session-creation route needed). The signed-in user's id is
+// passed via Stripe's own ?client_reference_id= URL param, the same field
+// api/payment/stripe-webhook already reads to link a completed payment back
+// to a Supabase user -- so verification is still REAL, server-to-server,
+// via webhook signature (see stripe-webhook/route.ts), not redirect-trust
+// like the old Square flow. See build/migration/010_stripe_payment_verification.sql.
+const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/14AbJ1dyHfmbaq2aRx7Vm00";
 
 export default function PaymentPage() {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
   const [ready, setReady] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const [showBypass, setShowBypass] = useState(false);
   const [bypassCode, setBypassCode] = useState("");
   const [bypassBusy, setBypassBusy] = useState(false);
@@ -48,6 +46,7 @@ export default function PaymentPage() {
         router.replace("/onboarding");
         return;
       }
+      setUserId(user.id);
       setReady(true);
     })();
     return () => {
@@ -56,8 +55,8 @@ export default function PaymentPage() {
   }, [supabase, router]);
 
   function goToCheckout() {
-    const redirectUrl = `${window.location.origin}/payment/confirm`;
-    const url = `${SQUARE_PAYMENT_LINK}?redirect_url=${encodeURIComponent(redirectUrl)}`;
+    if (!userId) return;
+    const url = `${STRIPE_PAYMENT_LINK}?client_reference_id=${encodeURIComponent(userId)}`;
     window.location.href = url;
   }
 
@@ -124,7 +123,8 @@ export default function PaymentPage() {
         </button>
 
         <div className="hint" style={{ marginTop: 14 }}>
-          You&apos;ll pay via Square, then come straight back here to finish setting up your account.
+          You&apos;ll pay securely via Stripe, then come straight back here to finish setting up your
+          account.
         </div>
 
         <div style={{ marginTop: 24, textAlign: "center" }}>
