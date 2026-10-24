@@ -906,6 +906,8 @@ export default function DashboardPage() {
       setMeetings((ms) => [...ms, rowToMeeting(data as MeetingRow)]);
       setNewMeet(""); setNewMeetDate(todayISODate()); setNewMeetTime("");
       notify("Meeting added");
+    } else {
+      notify("Couldn't save the meeting — please try again");
     }
   }
 
@@ -1818,9 +1820,9 @@ export default function DashboardPage() {
                     );
                   })
                 ) : (
-                  ([["Mon", 58], ["Tue", 66], ["Wed", 52], ["Thu", 74], ["Fri", 70], ["Sat", 63], ["Today", 78]] as [string, number][]).map(([d, h], i) => (
+                  ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Today"].map((d, i) => (
                     <div className="bar" key={`${d}-${i}`}>
-                      <div className="b" style={{ height: `${h}%` }} />
+                      <div className="b" style={{ height: "4%", background: "var(--line, #e5e5e5)" }} />
                       <small>{d}</small>
                     </div>
                   ))
