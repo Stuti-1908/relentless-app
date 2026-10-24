@@ -77,7 +77,9 @@ export default function OnboardingPage() {
         if (data.company) setCompany(data.company);
         if (data.role) setRole(data.role);
         if (data.phone) setPhone(data.phone);
-        if (data.timezone) setTimezone(data.timezone);
+        // profiles.timezone has a DB default (America/New_York) on every new row, so it is
+        // only a real user choice once they've onboarded; before that keep the browser zone.
+        if (data.timezone && data.onboarded) setTimezone(data.timezone);
         if (data.primary_goal) setGoal(data.primary_goal);
       }
       // Prefill name from the signup email if we have nothing else.

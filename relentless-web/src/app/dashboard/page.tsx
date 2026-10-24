@@ -404,10 +404,16 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data } = await supabase
-        .from("profiles").select("payment_verified,onboarded").eq("id", user.id).maybeSingle();
+        .from("profiles").select("payment_verified,onboarded,client_id").eq("id", user.id).maybeSingle();
       if (cancelled || !data) return;
       if (!data.payment_verified) router.replace("/payment");
       else if (!data.onboarded) router.replace("/onboarding");
+      // Self-heal: onboarding's one-shot provision can fail, leaving a paid client with no
+      // coaching record (no messages ever). Retry on every dashboard visit until it sticks.
+      else if (!data.client_id) {
+        const r = await fetch("/api/provision", { method: "POST" }).catch(() => null);
+        if (r?.ok && !cancelled) router.refresh();
+      }
     })();
     return () => { cancelled = true; };
   }, [supabase, router]);

@@ -1,25 +1,87 @@
 import { NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { createClient as createServiceClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getStripe } from "@/lib/stripe";
 import type Stripe from "stripe";
 
-// REAL server-side payment verification, replacing the old Square flow's
-// known accepted gap (redirect-trust only, api/payment/confirm just
-// believed whoever hit the URL). Stripe calls this endpoint directly,
-// server-to-server, when a checkout event happens — the signature check
-// below proves the request genuinely came from Stripe, not a user
-// pretending to have paid by guessing/bookmarking a URL.
+// REAL server-side payment verification. Stripe calls this endpoint directly,
+// server-to-server; the signature check proves the request came from Stripe.
 //
-// Configure this URL as a webhook endpoint in the Stripe Dashboard
-// (Developers -> Webhooks -> Add endpoint): https://<your-domain>/api/payment/stripe-webhook
-// listening for `checkout.session.completed`. Set the endpoint's signing
-// secret as STRIPE_WEBHOOK_SECRET in env — required for signature
-// verification below; without it this route rejects every request.
+// Stripe Dashboard -> Developers -> Webhooks endpoint:
+//   https://<your-domain>/api/payment/stripe-webhook
+// Events: checkout.session.completed, checkout.session.async_payment_succeeded,
+//   checkout.session.async_payment_failed, customer.subscription.updated,
+//   customer.subscription.deleted (invoice.payment_failed is accepted and logged).
+// Env: STRIPE_WEBHOOK_SECRET (endpoint signing secret), STRIPE_SECRET_KEY,
+//   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
+// Requires build/migration/011_stripe_subscription_lifecycle.sql.
 //
-// Uses the service-role Supabase client (not the session-bound one) since
-// Stripe's request carries no user session/cookie — the user is identified
-// via client_reference_id, which /payment/page.tsx sets to the signed-in
-// Supabase auth user id via the Payment Link's ?client_reference_id= param.
+// The user is identified via client_reference_id, which /payment/page.tsx sets
+// to the signed-in Supabase auth user id on the Payment Link. Later
+// subscription events are matched by stripe_subscription_id.
+
+// past_due is deliberately NOT revoked: Stripe is still retrying the card
+// (Smart Retries); access is removed only once Stripe gives up (unpaid/canceled).
+const ACTIVE = new Set(["active", "trialing", "past_due"]);
+const REVOKED = new Set(["canceled", "unpaid", "incomplete_expired"]);
+
+type Result = { ok: true } | { ok: false; status: number; reason: string };
+
+function idOf(v: string | { id: string } | null | undefined): string | null {
+  if (!v) return null;
+  return typeof v === "string" ? v : v.id;
+}
+
+async function onCheckout(supabase: SupabaseClient, session: Stripe.Checkout.Session, paid: boolean): Promise<Result> {
+  const userId = session.client_reference_id || session.metadata?.supabase_user_id;
+  if (!userId) {
+    console.error("[stripe-webhook] checkout session with no user id", session.id);
+    return { ok: true }; // acknowledge; nothing to link
+  }
+  const patch: Record<string, unknown> = {
+    stripe_customer_id: idOf(session.customer),
+    stripe_subscription_id: idOf(session.subscription),
+    stripe_checkout_session_id: session.id,
+  };
+  if (paid) {
+    patch.payment_verified = true;
+    patch.payment_verified_at = new Date().toISOString();
+    patch.subscription_status = "active";
+  } else {
+    patch.subscription_status = "payment_pending";
+  }
+  const { error } = await supabase.from("profiles").update(patch).eq("id", userId);
+  if (error) {
+    console.error("[stripe-webhook] profiles update failed", error.message);
+    return { ok: false, status: 500, reason: "db_error" }; // 500 -> Stripe retries
+  }
+  return { ok: true };
+}
+
+async function onSubscription(supabase: SupabaseClient, sub: Stripe.Subscription): Promise<Result> {
+  const status = sub.status;
+  const patch: Record<string, unknown> = { subscription_status: status };
+  if (REVOKED.has(status)) patch.payment_verified = false;
+  else if (ACTIVE.has(status)) patch.payment_verified = true;
+
+  let query = supabase.from("profiles").update(patch);
+  const userId = sub.metadata?.supabase_user_id;
+  query = userId ? query.eq("id", userId) : query.eq("stripe_subscription_id", sub.id);
+  const { data, error } = await query.select("id");
+  if (error) {
+    console.error("[stripe-webhook] subscription update failed", sub.id, error.message);
+    return { ok: false, status: 500, reason: "db_error" };
+  }
+  if (!data || data.length === 0) {
+    // A brand-new subscription can arrive before checkout.session.completed links it:
+    // ask Stripe to retry. Older unmatched ones belong to other products on the same
+    // Stripe account -> acknowledge, or Stripe would eventually disable this endpoint.
+    const ageSec = Date.now() / 1000 - (sub.created || 0);
+    console.warn("[stripe-webhook] no profile for subscription", sub.id, status, Math.round(ageSec) + "s old");
+    if (ageSec < 3600) return { ok: false, status: 404, reason: "profile_not_linked" };
+  }
+  return { ok: true };
+}
+
 export async function POST(req: Request) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
@@ -30,51 +92,46 @@ export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) return NextResponse.json({ ok: false, reason: "missing_signature" }, { status: 400 });
 
-  // Signature verification needs the RAW body bytes, not a parsed object —
-  // Next.js route handlers give us that via req.text() before any parsing.
+  // Signature verification needs the RAW body bytes, not a parsed object.
   const rawBody = await req.text();
 
   let event: Stripe.Event;
   try {
-    const stripe = getStripe();
-    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    event = getStripe().webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (e) {
     console.error("[api/payment/stripe-webhook] signature verification failed", e instanceof Error ? e.message : e);
     return NextResponse.json({ ok: false, reason: "invalid_signature" }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const userId = session.client_reference_id || session.metadata?.supabase_user_id;
+  const supabase = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
-    if (!userId) {
-      console.error("[api/payment/stripe-webhook] checkout.session.completed with no user id", session.id);
-      return NextResponse.json({ ok: true }); // acknowledge to Stripe, nothing to link
+  let result: Result = { ok: true };
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const s = event.data.object;
+      // Card payments arrive "paid"; delayed methods (bank debits) arrive "unpaid"
+      // and are settled later by async_payment_succeeded / _failed.
+      result = await onCheckout(supabase, s, s.payment_status === "paid" || s.payment_status === "no_payment_required");
+      break;
     }
-
-    const supabase = createServiceClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const { error } = await supabase
-      .from("profiles")
-      .update({
-        payment_verified: true,
-        payment_verified_at: new Date().toISOString(),
-        stripe_customer_id: typeof session.customer === "string" ? session.customer : null,
-        stripe_subscription_id: typeof session.subscription === "string" ? session.subscription : null,
-        stripe_checkout_session_id: session.id,
-      })
-      .eq("id", userId);
-
-    if (error) {
-      console.error("[api/payment/stripe-webhook] profiles update failed", error.message);
-      // Return 500 so Stripe retries this webhook delivery rather than
-      // silently losing a real payment confirmation.
-      return NextResponse.json({ ok: false, reason: "db_error" }, { status: 500 });
-    }
+    case "checkout.session.async_payment_succeeded":
+      result = await onCheckout(supabase, event.data.object, true);
+      break;
+    case "checkout.session.async_payment_failed":
+      result = await onCheckout(supabase, event.data.object, false);
+      break;
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      result = await onSubscription(supabase, event.data.object);
+      break;
+    case "invoice.payment_failed":
+      // Access follows the subscription status (past_due -> unpaid/canceled), not single invoices.
+      console.warn("[stripe-webhook] invoice payment failed", event.data.object.id);
+      break;
+    default:
+      break;
   }
 
+  if (!result.ok) return NextResponse.json({ ok: false, reason: result.reason }, { status: result.status });
   return NextResponse.json({ ok: true });
 }

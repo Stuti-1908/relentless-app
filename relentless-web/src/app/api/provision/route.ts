@@ -104,14 +104,28 @@ export async function POST(req: Request) {
   if (isValidTimezone(p.timezone)) clientProfileFields.timezone_override = p.timezone;
   if (phone) clientProfileFields.phone_override = phone;
 
+  // 3. Link the user's own profiles row to the new client_id FIRST: client_profile.client_id
+  // has a foreign key to profiles.client_id, so inserting client_profile before this link
+  // is rejected (23503) and the client is never provisioned.
+  const supabaseSession = await createServerClient();
+  const { error: upErr } = await supabaseSession
+    .from("profiles")
+    .update({ client_id: clientId, ghl_contact_id: ghlContactId, plan })
+    .eq("id", userId);
+  if (upErr) {
+    console.error("[provision] profiles link failed", upErr.message);
+    return NextResponse.json({ ok: false, reason: "profiles_link_failed" }, { status: 502 });
+  }
+
   const { error: cpErr } = await supabaseService.from("client_profile").insert(clientProfileFields);
   if (cpErr) {
     console.error("[provision] client_profile insert failed", cpErr.message);
+    // Undo the link so a retry provisions cleanly instead of short-circuiting on "already".
+    await supabaseService.from("profiles").update({ client_id: null, ghl_contact_id: null }).eq("id", userId);
     return NextResponse.json({ ok: false, reason: "client_profile_insert_failed" }, { status: 502 });
   }
 
-  // 2b. Immediate Day-1 welcome SMS (best-effort) — don't make the new client wait for the
-  // 6:30 AM onboarding cron to hear from us; they should get a text the moment they sign up.
+  // 4. Immediate Day-1 welcome SMS (best-effort), only once provisioning fully succeeded.
   if (ghl && ghlContactId) {
     try {
       const welcome =
@@ -126,17 +140,6 @@ export async function POST(req: Request) {
     } catch (e) {
       console.error("[provision] welcome SMS error", e instanceof Error ? e.message : e);
     }
-  }
-
-  // 3. Link the user's own profiles row to the new client_id (own-row update; RLS allows).
-  const supabaseSession = await createServerClient();
-  const { error: upErr } = await supabaseSession
-    .from("profiles")
-    .update({ client_id: clientId, ghl_contact_id: ghlContactId, plan })
-    .eq("id", userId);
-  if (upErr) {
-    console.error("[provision] profiles link failed", upErr.message);
-    return NextResponse.json({ ok: false, reason: "profiles_link_failed" }, { status: 502 });
   }
 
   return NextResponse.json({ ok: true, clientId, ghlContactId, provisioned: true });
