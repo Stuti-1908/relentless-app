@@ -56,7 +56,11 @@ export async function POST(req: Request) {
   const p = profile || {};
   const fullName = (typeof p.full_name === "string" ? p.full_name : "").trim() || "Client";
   const phone = toE164(typeof p.phone === "string" ? p.phone : undefined);
-  const email = typeof p.email === "string" ? p.email : null;
+  // profiles has no email column, so fall back to the login email: international clients are
+  // coached by email (their SMS replies never come back), so a missing email means no two-way channel.
+  const supabaseSession = await createServerClient();
+  const { data: { user: authUser } } = await supabaseSession.auth.getUser();
+  const email = typeof p.email === "string" && p.email ? p.email : authUser?.email ?? null;
   const goal = typeof p.primary_goal === "string" ? p.primary_goal : null;
   const plan = ctx?.plan && ctx.plan !== "standard" ? ctx.plan : typeof p.plan === "string" ? p.plan : "standard";
   const clientId = newClientId();
@@ -107,7 +111,6 @@ export async function POST(req: Request) {
   // 3. Link the user's own profiles row to the new client_id FIRST: client_profile.client_id
   // has a foreign key to profiles.client_id, so inserting client_profile before this link
   // is rejected (23503) and the client is never provisioned.
-  const supabaseSession = await createServerClient();
   const { error: upErr } = await supabaseSession
     .from("profiles")
     .update({ client_id: clientId, ghl_contact_id: ghlContactId, plan })
