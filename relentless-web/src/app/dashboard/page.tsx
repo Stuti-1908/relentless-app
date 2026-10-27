@@ -339,6 +339,14 @@ function IconLogout() {
     </svg>
   );
 }
+function IconBell() {
+  return (
+    <svg viewBox="0 0 24 24">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </svg>
+  );
+}
 function IconLink() {
   return (
     <svg viewBox="0 0 24 24">
@@ -1021,6 +1029,15 @@ export default function DashboardPage() {
 
           <button
             className="cc-nav-btn"
+            aria-label="Notification settings"
+            onClick={() => router.push("/settings")}
+          >
+            <IconBell />
+            <span className="cc-nav-tooltip">Notification settings</span>
+          </button>
+
+          <button
+            className="cc-nav-btn"
             aria-label="Free AI Business Audit"
             onClick={() => router.push("/diagnostic")}
           >
@@ -1080,6 +1097,16 @@ export default function DashboardPage() {
                       >
                         <IconUser />
                         Profile
+                      </button>
+                      <button
+                        className="dropdown-item"
+                        onClick={() => {
+                          setProfileDropdownOpen(false);
+                          router.push("/settings");
+                        }}
+                      >
+                        <IconBell />
+                        Notification settings
                       </button>
                       <button
                         className="dropdown-item signout-btn"
