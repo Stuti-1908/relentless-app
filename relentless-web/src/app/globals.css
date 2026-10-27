@@ -766,3 +766,9 @@ h2.sec{font-size:18px;color:var(--ink);font-weight:700;margin:0 0 12px}
 .set-toast-ok{background:var(--ink)}
 .set-toast-err{background:#b42318}
 @media(max-width:560px){.set-row{padding:14px 16px}}
+.set-billing{border-color:var(--gold)}
+.set-billing .set-row{flex-wrap:wrap}
+.set-price{font-size:20px;color:var(--ink)}
+.set-pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#f0f1f3}
+.set-pill-active,.set-pill-beta{background:var(--green-light);color:#047857}
+.set-pill-past_due,.set-pill-cancelled{background:var(--amber-light);color:var(--amber)}

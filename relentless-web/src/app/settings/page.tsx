@@ -5,12 +5,27 @@ import { useRouter } from "next/navigation";
 import { NOTIFICATION_CATEGORIES, type NotificationKey, type NotificationPrefs } from "@/lib/notificationPrefs";
 
 type Load = "loading" | "ready" | "not_provisioned" | "error";
+type Billing = {
+  plan: { name: string; amount: string; interval: string };
+  state: "active" | "past_due" | "beta" | "cancelled" | "none";
+  canManage: boolean;
+};
+
+const BILLING_STATUS: Record<Billing["state"], { label: string; note: string }> = {
+  active: { label: "Active", note: "Your subscription is active. Update your card, download invoices or cancel any time from the billing portal." },
+  past_due: { label: "Payment past due", note: "Your last payment didn't go through. Update your card in the billing portal to keep your coaching running." },
+  beta: { label: "Beta access", note: "You're on free beta access — nothing is being charged." },
+  cancelled: { label: "Cancelled", note: "Your subscription has ended. Subscribe again to restart your coaching." },
+  none: { label: "Not subscribed", note: "Subscribe to start receiving your daily coaching." },
+};
 
 export default function SettingsPage() {
   const router = useRouter();
   const [load, setLoad] = useState<Load>("loading");
   const [prefs, setPrefs] = useState<NotificationPrefs>({});
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [billing, setBilling] = useState<Billing | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -19,6 +34,29 @@ export default function SettingsPage() {
     if (msgTimer.current) clearTimeout(msgTimer.current);
     msgTimer.current = setTimeout(() => setMsg(null), 3500);
   }, []);
+
+  useEffect(() => {
+    fetch("/api/billing", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => d.ok && setBilling(d))
+      .catch(() => {});
+  }, []);
+
+  async function openPortal() {
+    setPortalBusy(true);
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      flash("err", "Billing portal isn't available right now — email support and we'll sort it out.");
+    } catch {
+      flash("err", "Couldn't open the billing portal — please try again.");
+    }
+    setPortalBusy(false);
+  }
 
   useEffect(() => {
     (async () => {
@@ -91,6 +129,32 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {billing && (
+        <div className="set-card set-billing" id="billing">
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-count" style={{ margin: 0 }}>Plan &amp; billing</span>
+              <h3 style={{ marginTop: 6 }}>{billing.plan.name}</h3>
+              <p>
+                <b className="set-price">{billing.plan.amount}</b> / {billing.plan.interval} · cancel anytime ·{" "}
+                <span className={`set-pill set-pill-${billing.state}`}>{BILLING_STATUS[billing.state].label}</span>
+              </p>
+              <p style={{ marginTop: 6 }}>{BILLING_STATUS[billing.state].note}</p>
+            </div>
+            {(billing.state === "none" || billing.state === "cancelled") && (
+              <button className="btn btn-primary" onClick={() => router.push("/payment")}>Subscribe — {billing.plan.amount}/mo</button>
+            )}
+            {billing.canManage && billing.state !== "none" && (
+              <button className="btn btn-ghost" disabled={portalBusy} onClick={openPortal}>
+                {portalBusy ? "Opening…" : "Manage billing"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="set-count" style={{ marginTop: 22 }}>Notifications</div>
+
       {load === "loading" && <p className="set-note">Loading your settings…</p>}
       {load === "error" && (
         <p className="set-note set-err">Couldn&apos;t load your settings. Refresh the page, or try again in a minute.</p>
@@ -120,7 +184,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="set-count">
+          <div className="set-count" style={{ marginTop: 6 }}>
             {paused ? "Paused" : `${onCount} of ${NOTIFICATION_CATEGORIES.length} message types on`}
           </div>
 

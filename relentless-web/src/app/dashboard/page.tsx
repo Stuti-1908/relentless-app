@@ -1109,6 +1109,16 @@ export default function DashboardPage() {
                         Notification settings
                       </button>
                       <button
+                        className="dropdown-item"
+                        onClick={() => {
+                          setProfileDropdownOpen(false);
+                          router.push("/settings#billing");
+                        }}
+                      >
+                        <IconUser />
+                        Plan &amp; billing
+                      </button>
+                      <button
                         className="dropdown-item signout-btn"
                         onClick={() => {
                           setProfileDropdownOpen(false);
