@@ -22,7 +22,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "err" | "ok"; text: string } | null>(null);
+  // /auth/callback sends failed Google sign-ins back here with ?error=auth&reason=... — show why.
+  const [msg, setMsg] = useState<{ kind: "err" | "ok"; text: string } | null>(() => {
+    if (typeof window === "undefined") return null;
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("error") !== "auth") return null;
+    const reason = q.get("reason") || "";
+    return { kind: "err", text: `Google sign-in didn't complete${reason && reason !== "no_code" ? `: ${reason}` : ""}. Please try again, or sign in with email.` };
+  });
 
   async function handleForgotPassword() {
     setMsg(null);

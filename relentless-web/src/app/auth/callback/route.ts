@@ -16,7 +16,11 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
+    if (error) {
+      console.error("[auth/callback] code exchange failed", error.message);
+      return NextResponse.redirect(`${origin}/login?error=auth&reason=${encodeURIComponent(error.message.slice(0, 160))}`);
+    }
+    {
       const refreshToken = data.session?.provider_refresh_token;
       if (refreshToken && next.startsWith("/connections")) {
         const { data: { user } } = await supabase.auth.getUser();
@@ -32,6 +36,9 @@ export async function GET(request: Request) {
     }
   }
 
-  // Something went wrong — back to login with a flag.
-  return NextResponse.redirect(`${origin}/login?error=auth`);
+  // Google/Supabase sent the user back with an error (denied, blocked app, expired link...) or no code.
+  // Pass the reason on so the login page can show it instead of silently reloading.
+  const reason = searchParams.get("error_description") || searchParams.get("error") || "no_code";
+  console.error("[auth/callback] sign-in failed", reason);
+  return NextResponse.redirect(`${origin}/login?error=auth&reason=${encodeURIComponent(reason.slice(0, 160))}`);
 }
