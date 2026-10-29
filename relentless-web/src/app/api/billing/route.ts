@@ -6,7 +6,7 @@ import { getClientContext } from "@/lib/clientContext";
 // The price is the one shown on /payment — keep the two in sync if the Stripe price ever changes.
 const PLAN = { name: "Relentless AI — Executive Coaching", amount: "$69", interval: "month" } as const;
 
-type BillingState = "active" | "past_due" | "beta" | "cancelled" | "none";
+type BillingState = "active" | "past_due" | "founding" | "beta" | "cancelled" | "none";
 
 export async function GET() {
   const { userId, profile } = await getClientContext();
@@ -21,7 +21,7 @@ export async function GET() {
 
   let state: BillingState;
   if (verified && subId) state = subStatus === "past_due" ? "past_due" : "active";
-  else if (verified) state = "beta";
+  else if (verified) state = subStatus === "grandfathered" ? "founding" : "beta";
   else if (subId || customerId) state = "cancelled";
   else state = "none";
 

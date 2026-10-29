@@ -69,7 +69,9 @@ export async function POST(req: Request) {
   let ghlContactId: string | null = null;
   if (ghl && ghlLoc && phone) {
     try {
-      const r = await fetch(`${GHL_API}/contacts/`, {
+      // upsert, not create: the location rejects duplicate contacts, and the purchase welcome email
+      // (lib/welcomeEmail.ts) has usually already created this person's contact by email.
+      const r = await fetch(`${GHL_API}/contacts/upsert`, {
         method: "POST",
         headers: { Authorization: `Bearer ${ghl}`, Version: "2021-07-28", "Content-Type": "application/json" },
         body: JSON.stringify({ locationId: ghlLoc, name: fullName, phone, ...(email ? { email } : {}) }),

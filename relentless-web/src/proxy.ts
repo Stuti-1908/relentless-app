@@ -8,6 +8,8 @@ import { NextResponse, type NextRequest } from "next/server";
 // and sends signed-out visitors to /login before page.tsx ever runs.
 const PUBLIC_PATHS = ["/", "/welcome", "/login", "/auth", "/api/health", "/diagnostic", "/api/diagnostic", "/api/mock", "/api/provision"];
 
+const PAID_PATHS = ["/dashboard", "/onboarding", "/settings", "/connections"];
+
 // Next.js 16 renamed the "middleware" convention to "proxy".
 export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
@@ -59,6 +61,23 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = consented ? "/dashboard" : "/consent";
     return NextResponse.redirect(url);
+  }
+
+  // Paid-only app pages. Enforced here on the server (not just in each page's client code) so a new
+  // user can't reach the dashboard before paying. Existing members were grandfathered by
+  // build/migration/013_grandfather_existing_members.sql (payment_verified = true).
+  if (user && PAID_PATHS.some((p) => path === p || path.startsWith(p + "/"))) {
+    const url = request.nextUrl.clone();
+    if (!user.user_metadata?.consented_at) {
+      url.pathname = "/consent";
+      return NextResponse.redirect(url);
+    }
+    const { data: prof } = await supabase.from("profiles").select("payment_verified").eq("id", user.id).maybeSingle();
+    if (prof?.payment_verified !== true) {
+      url.pathname = "/payment";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

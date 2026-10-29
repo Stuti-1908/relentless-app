@@ -16,13 +16,24 @@ export default function WelcomePage() {
           <div className={styles.logo}>
             <img src="/icon-192.png" alt="Relentless" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <p className={styles.eyebrow}>Relentless AI · Private Beta</p>
+          <p className={styles.eyebrow}>Relentless AI · Executive Coaching</p>
           <h1>
             The coach who <span className={styles.accent}>never</span> clocks out.
           </h1>
           <p className={styles.lede}>
             A personal executive coach in your pocket — showing up every day, in your corner,
             pushing you toward the business you said you wanted.
+          </p>
+          <div className={styles.heroCtas}>
+            <Link className={styles.cta} href="/login?mode=signup">
+              Start for $69/month
+            </Link>
+            <a className={styles.ghost} href="#pricing">
+              See pricing
+            </a>
+          </div>
+          <p className={styles.fine}>
+            Already a member? <Link href="/login">Sign in</Link>
           </p>
         </div>
       </header>
@@ -138,25 +149,27 @@ export default function WelcomePage() {
         </div>
       </section>
 
-      <section className={styles.section}>
+      <section className={styles.section} id="pricing">
         <div className={styles.wrap}>
           <div className={styles.beta}>
-            <p className={styles.eyebrow}>The invitation</p>
-            <h2>Be one of our first.</h2>
-            <p className={styles.body}>
-              We&apos;re opening a small private beta to a handful of founders and operators who want
-              a sharper edge. You get the full experience — and a direct line to shape it.
+            <p className={styles.eyebrow}>Pricing</p>
+            <h2>One plan. Everything included.</h2>
+            <p className={styles.price}>
+              $69<span>/month</span>
             </p>
+            <p className={styles.body}>Cancel anytime from your dashboard. No contracts, no setup fees.</p>
             <ul className={styles.terms}>
-              <li>Full access, free for the beta period</li>
-              <li>Personal onboarding — dialed to your goals</li>
-              <li>Your feedback directly shapes the product</li>
-              <li>Locked-in founding-member pricing when we launch</li>
+              <li>Daily morning briefing, built around your energy and priorities</li>
+              <li>Timely nudges, an honest evening score and a weekly partner check-in</li>
+              <li>Meeting and task reminders by text or email, and you can reply to every message</li>
+              <li>Market intelligence for your industry</li>
+              <li>Your dashboard: scores, trends, tasks and the War Room</li>
+              <li>Choose exactly which messages you get, and pause any time</li>
             </ul>
             <Link className={styles.cta} href="/login?mode=signup">
-              Claim your beta seat
+              Get started for $69/month
             </Link>
-            <p className={styles.fine}>Limited seats · Serious operators only</p>
+            <p className={styles.fine}>Secure checkout by Stripe · Billed monthly in USD</p>
           </div>
         </div>
       </section>

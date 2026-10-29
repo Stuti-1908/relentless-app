@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServiceClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getStripe } from "@/lib/stripe";
+import { sendWelcomeEmail } from "@/lib/welcomeEmail";
 import type Stripe from "stripe";
 
 // REAL server-side payment verification. Stripe calls this endpoint directly,
@@ -37,6 +38,14 @@ async function onCheckout(supabase: SupabaseClient, session: Stripe.Checkout.Ses
     console.error("[stripe-webhook] checkout session with no user id", session.id);
     return { ok: true }; // acknowledge; nothing to link
   }
+  // Read the previous state so the welcome email goes out exactly once (Stripe retries and sends
+  // both completed + async_payment_succeeded for delayed payment methods).
+  const { data: before } = await supabase
+    .from("profiles")
+    .select("payment_verified, full_name")
+    .eq("id", userId)
+    .maybeSingle();
+
   const patch: Record<string, unknown> = {
     stripe_customer_id: idOf(session.customer),
     stripe_subscription_id: idOf(session.subscription),
@@ -53,6 +62,14 @@ async function onCheckout(supabase: SupabaseClient, session: Stripe.Checkout.Ses
   if (error) {
     console.error("[stripe-webhook] profiles update failed", error.message);
     return { ok: false, status: 500, reason: "db_error" }; // 500 -> Stripe retries
+  }
+
+  if (paid && before?.payment_verified !== true) {
+    let email = session.customer_details?.email || session.customer_email || null;
+    if (!email) email = (await supabase.auth.admin.getUserById(userId)).data.user?.email ?? null;
+    const name = (typeof before?.full_name === "string" && before.full_name) || session.customer_details?.name || null;
+    if (email) await sendWelcomeEmail(email, name);
+    else console.error("[stripe-webhook] no email for welcome message", userId);
   }
   return { ok: true };
 }

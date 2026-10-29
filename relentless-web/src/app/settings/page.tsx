@@ -7,13 +7,14 @@ import { NOTIFICATION_CATEGORIES, type NotificationKey, type NotificationPrefs }
 type Load = "loading" | "ready" | "not_provisioned" | "error";
 type Billing = {
   plan: { name: string; amount: string; interval: string };
-  state: "active" | "past_due" | "beta" | "cancelled" | "none";
+  state: "active" | "past_due" | "founding" | "beta" | "cancelled" | "none";
   canManage: boolean;
 };
 
 const BILLING_STATUS: Record<Billing["state"], { label: string; note: string }> = {
   active: { label: "Active", note: "Your subscription is active. Update your card, download invoices or cancel any time from the billing portal." },
   past_due: { label: "Payment past due", note: "Your last payment didn't go through. Update your card in the billing portal to keep your coaching running." },
+  founding: { label: "Founding member", note: "You joined before launch, so your access stays included — nothing is being charged." },
   beta: { label: "Beta access", note: "You're on free beta access — nothing is being charged." },
   cancelled: { label: "Cancelled", note: "Your subscription has ended. Subscribe again to restart your coaching." },
   none: { label: "Not subscribed", note: "Subscribe to start receiving your daily coaching." },
