@@ -24,6 +24,7 @@ import type Stripe from "stripe";
 // (Smart Retries); access is removed only once Stripe gives up (unpaid/canceled).
 const ACTIVE = new Set(["active", "trialing", "past_due"]);
 const REVOKED = new Set(["canceled", "unpaid", "incomplete_expired"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Result = { ok: true } | { ok: false; status: number; reason: string };
 
@@ -34,9 +35,16 @@ function idOf(v: string | { id: string } | null | undefined): string | null {
 
 async function onCheckout(supabase: SupabaseClient, session: Stripe.Checkout.Session, paid: boolean): Promise<Result> {
   const userId = session.client_reference_id || session.metadata?.supabase_user_id;
-  if (!userId) {
-    console.error("[stripe-webhook] checkout session with no user id", session.id);
+  if (!userId || !UUID.test(userId)) {
+    // A malformed id would make the DB update error -> 500 -> Stripe retries for days.
+    console.error("[stripe-webhook] checkout session with no/invalid user id", session.id, userId);
     return { ok: true }; // acknowledge; nothing to link
+  }
+  // Only our coaching Payment Link grants access, not any other product sold on this Stripe account.
+  const linkId = process.env.STRIPE_PAYMENT_LINK_ID;
+  if (linkId && idOf(session.payment_link) !== linkId) {
+    console.warn("[stripe-webhook] checkout from another payment link ignored", session.id, idOf(session.payment_link));
+    return { ok: true };
   }
   // Read the previous state so the welcome email goes out exactly once (Stripe retries and sends
   // both completed + async_payment_succeeded for delayed payment methods).
@@ -74,7 +82,15 @@ async function onCheckout(supabase: SupabaseClient, session: Stripe.Checkout.Ses
   return { ok: true };
 }
 
-async function onSubscription(supabase: SupabaseClient, sub: Stripe.Subscription): Promise<Result> {
+async function onSubscription(supabase: SupabaseClient, eventSub: Stripe.Subscription): Promise<Result> {
+  // Events can arrive out of order (a retried "active" after "canceled"), so act on Stripe's
+  // current state, not the payload.
+  let sub = eventSub;
+  try {
+    sub = await getStripe().subscriptions.retrieve(eventSub.id);
+  } catch (e) {
+    console.warn("[stripe-webhook] could not re-read subscription; using event payload", eventSub.id, e instanceof Error ? e.message : e);
+  }
   const status = sub.status;
   const patch: Record<string, unknown> = { subscription_status: status };
   if (REVOKED.has(status)) patch.payment_verified = false;
@@ -83,7 +99,7 @@ async function onSubscription(supabase: SupabaseClient, sub: Stripe.Subscription
   let query = supabase.from("profiles").update(patch);
   const userId = sub.metadata?.supabase_user_id;
   query = userId ? query.eq("id", userId) : query.eq("stripe_subscription_id", sub.id);
-  const { data, error } = await query.select("id");
+  const { data, error } = await query.select("id, client_id");
   if (error) {
     console.error("[stripe-webhook] subscription update failed", sub.id, error.message);
     return { ok: false, status: 500, reason: "db_error" };
@@ -95,6 +111,14 @@ async function onSubscription(supabase: SupabaseClient, sub: Stripe.Subscription
     const ageSec = Date.now() / 1000 - (sub.created || 0);
     console.warn("[stripe-webhook] no profile for subscription", sub.id, status, Math.round(ageSec) + "s old");
     if (ageSec < 3600) return { ok: false, status: 404, reason: "profile_not_linked" };
+  }
+  // Stop (or resume) the n8n coaching messages with the subscription, not just dashboard access.
+  if (REVOKED.has(status) || ACTIVE.has(status)) {
+    const ids = (data ?? []).map((r) => r.client_id).filter((c): c is string => !!c);
+    if (ids.length) {
+      const { error: cpErr } = await supabase.from("client_profile").update({ active: ACTIVE.has(status) }).in("client_id", ids);
+      if (cpErr) console.error("[stripe-webhook] client_profile.active update failed", cpErr.message);
+    }
   }
   return { ok: true };
 }

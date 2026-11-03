@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { sameOriginOk } from "@/lib/csrf";
 
 // Beta-tester bypass for the payment gate — added 2026-08-29 when the
@@ -17,8 +19,20 @@ import { sameOriginOk } from "@/lib/csrf";
 // system: the code is a shared secret typed into a public-facing form, with
 // no per-user tracking of who used it. Remove or disable this route once the
 // product is out of the pre-launch testing phase.
+function sameCode(a: string, b: string): boolean {
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
 export async function POST(req: Request) {
   if (!sameOriginOk(req)) return NextResponse.json({ ok: false, reason: "bad_origin" }, { status: 403 });
+
+  // Session first, so an anonymous caller can't use this route to test codes.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
 
   const expected = process.env.RELENTLESS_BETA_BYPASS_CODE;
   if (!expected) {
@@ -31,25 +45,21 @@ export async function POST(req: Request) {
   } catch {
     /* ignore */
   }
-  if (!code || code !== expected) {
+  if (!code || !sameCode(code, expected)) {
+    console.warn("[api/payment/beta-bypass] wrong code", user.id);
     return NextResponse.json({ ok: false, reason: "invalid_code" }, { status: 403 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
-
-  const { error } = await supabase
+  // payment_verified is not writable from the user's own session (migration 014).
+  const { error } = await createServiceClient()
     .from("profiles")
-    .update({ payment_verified: true, payment_verified_at: new Date().toISOString() })
+    .update({ payment_verified: true, payment_verified_at: new Date().toISOString(), subscription_status: "beta" })
     .eq("id", user.id);
 
   if (error) {
     console.error("[api/payment/beta-bypass] update failed", error.message);
     return NextResponse.json({ ok: false, reason: "db_error" }, { status: 502 });
   }
-
+  console.log("[api/payment/beta-bypass] access granted", user.id);
   return NextResponse.json({ ok: true });
 }

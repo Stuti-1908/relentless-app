@@ -3,6 +3,7 @@ import { db, resetDb } from "../../db";
 
 // Handle catch-all requests to mock Supabase Auth & Database
 export async function GET(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const { searchParams } = new URL(req.url);
@@ -76,6 +77,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ path: st
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   if (path[0] === "auth") {
@@ -272,6 +274,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ path: s
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const { searchParams } = new URL(req.url);
@@ -314,6 +317,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ path: 
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const { searchParams } = new URL(req.url);
@@ -357,6 +361,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ path:
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
 

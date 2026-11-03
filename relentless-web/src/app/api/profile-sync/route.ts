@@ -40,6 +40,7 @@ export async function POST(request: Request) {
   if (!userId) {
     return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
   }
+  if (!ctx?.paid) return NextResponse.json({ ok: false, reason: "payment_required" }, { status: 402 });
   const clientId = ctx?.clientId;
   if (!clientId) {
     return NextResponse.json({ ok: false, reason: "not_provisioned" }, { status: 200 });

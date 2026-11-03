@@ -48,6 +48,7 @@ export async function POST(request: Request) {
   // Must be signed in (writes on the user's behalf).
   const { userId, ctx } = await getClientContext();
   if (!userId) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
+  if (!ctx?.paid) return NextResponse.json({ ok: false, reason: "payment_required" }, { status: 402 });
 
   // GHL contact resolved from the user's profile — never a shared env var.
   const contactId = ctx?.ghlContactId;

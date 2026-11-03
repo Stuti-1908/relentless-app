@@ -14,6 +14,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad origin" }, { status: 403 });
   }
   const { userId, ctx } = await getClientContext();
+  if (userId && ctx && !ctx.paid) return NextResponse.json({ error: "payment_required" }, { status: 402 });
   if (!userId) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   const clientId = ctx?.clientId;
   // Provisioned = has a client_id (Supabase client_profile row), not the legacy

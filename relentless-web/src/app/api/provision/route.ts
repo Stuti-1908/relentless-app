@@ -45,6 +45,8 @@ export async function POST(req: Request) {
 
   const { userId, ctx, profile } = await getClientContext();
   if (!userId) return NextResponse.json({ ok: false, reason: "unauthenticated" }, { status: 401 });
+  // Only paying (or grandfathered) members get a coaching record, GHL contact and daily messages.
+  if (!ctx?.paid) return NextResponse.json({ ok: false, reason: "payment_required" }, { status: 402 });
 
   // Idempotent — already provisioned.
   if (ctx?.clientId) {
@@ -113,7 +115,7 @@ export async function POST(req: Request) {
   // 3. Link the user's own profiles row to the new client_id FIRST: client_profile.client_id
   // has a foreign key to profiles.client_id, so inserting client_profile before this link
   // is rejected (23503) and the client is never provisioned.
-  const { error: upErr } = await supabaseSession
+  const { error: upErr } = await supabaseService
     .from("profiles")
     .update({ client_id: clientId, ghl_contact_id: ghlContactId, plan })
     .eq("id", userId);

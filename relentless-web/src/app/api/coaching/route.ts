@@ -35,6 +35,7 @@ const str = (v: unknown): string | null =>
 export async function GET() {
   // Only signed-in users (401 JSON, not a redirect).
   const { userId, ctx } = await getClientContext();
+  if (userId && ctx && !ctx.paid) return NextResponse.json({ ok: false, reason: "payment_required" }, { status: 402 });
   if (!userId) {
     return NextResponse.json({ configured: false, reason: "unauthenticated" }, { status: 401 });
   }

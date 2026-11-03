@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   // Parse x-www-form-urlencoded body
   const text = await req.text();
   const params = new URLSearchParams(text);

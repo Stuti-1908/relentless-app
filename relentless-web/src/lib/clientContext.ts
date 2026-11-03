@@ -9,6 +9,8 @@ export type ClientContext = {
   baseId: string | null;
   ghlContactId: string | null;
   plan: string;
+  // Paid (or grandfathered/beta) member. Every paid-only API checks this; the proxy gate only covers pages.
+  paid: boolean;
 };
 
 export async function getClientContext(): Promise<{
@@ -38,6 +40,7 @@ export async function getClientContext(): Promise<{
       baseId: str(row.airtable_base_id),
       ghlContactId: str(row.ghl_contact_id),
       plan: str(row.plan) ?? "standard",
+      paid: row.payment_verified === true,
     },
   };
 }

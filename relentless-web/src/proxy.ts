@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 // "/" must be public too: signed-out visitors land there and page.tsx redirects them
 // to /welcome. Without it, the !user && !isPublic check below intercepts "/" first
 // and sends signed-out visitors to /login before page.tsx ever runs.
-const PUBLIC_PATHS = ["/", "/welcome", "/login", "/auth", "/api/health", "/diagnostic", "/api/diagnostic", "/api/mock", "/api/provision"];
+const PUBLIC_PATHS = ["/", "/welcome", "/login", "/auth", "/api/health", "/diagnostic", "/api/diagnostic", "/api/mock"];
 
 const PAID_PATHS = ["/dashboard", "/onboarding", "/settings", "/connections"];
 

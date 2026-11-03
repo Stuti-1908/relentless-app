@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "../../db";
 
 export async function GET(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const { searchParams } = new URL(req.url);
@@ -40,6 +41,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ path: st
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const table = path[1] as keyof typeof db.airtable;
@@ -59,6 +61,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ path: s
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  if (process.env.VERCEL_ENV === "production") return new Response(null, { status: 404 }); // test-only mock
   const resolvedParams = await params;
   const path = resolvedParams.path;
   const table = path[1] as keyof typeof db.airtable;
