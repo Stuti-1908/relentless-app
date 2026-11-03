@@ -116,8 +116,9 @@ export default function OnboardingPage() {
       setError("Session expired — please sign in again.");
       return;
     }
-    const { error: err } = await supabase.from("profiles").upsert({
-      id: user.id,
+    // The signup trigger always creates the row, so this is a plain update: an upsert also
+    // rewrites `id`, which the browser may not do since migration 014's column grants.
+    const fields = {
       full_name: fullName.trim(),
       company: company.trim() || null,
       role: role.trim() || null,
@@ -126,7 +127,9 @@ export default function OnboardingPage() {
       primary_goal: goal.trim() || null,
       onboarded: true,
       updated_at: new Date().toISOString(),
-    });
+    };
+    const upd = await supabase.from("profiles").update(fields).eq("id", user.id).select("id");
+    const err = upd.error ?? (upd.data?.length ? null : (await supabase.from("profiles").insert({ id: user.id, ...fields })).error);
     if (err) {
       setSaving(false);
       // 42P01 = undefined_table (profiles not created yet); use the structured code, not a string match.
